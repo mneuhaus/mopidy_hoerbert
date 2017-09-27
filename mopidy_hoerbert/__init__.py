@@ -6,7 +6,7 @@ import os
 from mopidy import config, ext
 
 
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 
 # TODO: If you need to log, use loggers named after the current Python module
 logger = logging.getLogger(__name__)
@@ -24,9 +24,15 @@ class Extension(ext.Extension):
 
     def get_config_schema(self):
         schema = super(Extension, self).get_config_schema()
-        # TODO: Comment in and edit, or remove entirely
-        #schema['username'] = config.String()
-        #schema['password'] = config.Secret()
+        schema['pin_button_play'] = config.Integer()
+        schema['pin_button_sleep'] = config.Integer()
+        schema['sleep_time'] = config.Integer()
+        schema['pin_button_volume_up'] = config.Integer()
+        schema['pin_button_volume_down'] = config.Integer()
+        schema['volume_steps'] = config.Integer()
+        for i in range(1, 10):
+            schema['pin_button_playlist_' + str(i)] = config.Integer()
+            schema['playlist_' + str(i)] = config.String()
         return schema
 
     def setup(self, registry):
@@ -34,15 +40,15 @@ class Extension(ext.Extension):
         # in a single extension.
 
         # TODO: Edit or remove entirely
-        from .frontend import FoobarFrontend
-        registry.add('frontend', FoobarFrontend)
+        from .frontend import GpioFrontend
+        registry.add('frontend', GpioFrontend)
 
-        # TODO: Edit or remove entirely
-        from .backend import FoobarBackend
-        registry.add('backend', FoobarBackend)
+        # # TODO: Edit or remove entirely
+        # from .backend import FoobarBackend
+        # registry.add('backend', FoobarBackend)
 
-        # TODO: Edit or remove entirely
-        registry.add('http:static', {
-            'name': self.ext_name,
-            'path': os.path.join(os.path.dirname(__file__), 'static'),
-        })
+        # # TODO: Edit or remove entirely
+        # registry.add('http:static', {
+        #     'name': self.ext_name,
+        #     'path': os.path.join(os.path.dirname(__file__), 'static'),
+        # })

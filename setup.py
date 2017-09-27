@@ -14,7 +14,7 @@ def get_version(filename):
 setup(
     name='Mopidy-Hoerbert',
     version=get_version('mopidy_hoerbert/__init__.py'),
-    url='https://github.com/mneuhaus/mopidy-hoerbert',
+    url='https://github.com/mneuhaus/mopidy_hoerbert',
     license='Apache License, Version 2.0',
     author='Marc Neuhaus',
     author_email='apocalip@gmail.com',

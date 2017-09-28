@@ -25,7 +25,7 @@ class GPIOManager():
 
         try:
             GPIO.setmode(GPIO.BCM)
-            GPIO.setup(4, GPIO.OUT)
+            #GPIO.setup(4, GPIO.OUT)
             self.correctlyLoaded = True
         except RuntimeError:
             logger.error("TTSGPIO: Not enough permission " +
@@ -41,7 +41,7 @@ class GPIOManager():
         if longpress:
             GPIO.add_event_detect(pin, GPIO.BOTH, callback=self.catch_button_press_with_longpress, bouncetime=30)
         else:
-            GPIO.add_event_detect(pin, GPIO.BOTH, callback=self.catch_button_press, bouncetime=30)
+            GPIO.add_event_detect(pin, GPIO.BOTH, callback=self.catch_button_press, bouncetime=700)
 
     def catch_button_press_with_longpress(self, pin):
         button = self.buttons[pin]

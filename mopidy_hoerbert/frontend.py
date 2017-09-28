@@ -6,9 +6,11 @@ import threading
 from mopidy import core
 from .gpio_manager import GPIOManager
 from humanfriendly import format_timespan
+from RPi import GPIO
+from time import sleep
+from mpd import MPDClient
 
 logger = logging.getLogger(__name__)
-
 
 class GpioFrontend(pykka.ThreadingActor, core.CoreListener):
 
@@ -21,39 +23,30 @@ class GpioFrontend(pykka.ThreadingActor, core.CoreListener):
 
         self.playlists = {}
         self.currentPlaylist = -1
+        self.update_playlists_registry()
+        self.core.playback.volume = 10
+        self.volume = 10
 
-        self.gpio_manager.register_rotary_encode(
-            'volume',
-            self.config["pin_button_volume_up"],
-            self.config["pin_button_volume_down"],
-            self.config["volume_steps"]
-        )
+        # self.gpio_manager.register_rotary_encode(
+        #     'volume',
+        #     self.config["pin_button_volume_up"],
+        #     self.config["pin_button_volume_down"],
+        #     self.config["volume_steps"]
+        # )
 
-        self.gpio_manager.register_button(self.config["pin_button_play"], 'play')
-        self.gpio_manager.register_button(self.config["pin_button_sleep"], 'sleep')
-
-        #self.gpio_manager.register_button(26, 'Fav8 - GPIO-' + str(26))
-        #self.gpio_manager.register_button(16, 'Fav7 - GPIO-' + str(16))
-        #self.gpio_manager.register_button(13, 'Play/Pause - GPIO-' + str(13))
-        #self.gpio_manager.register_button(12, 'Fav5 - GPIO-' + str(12))
-        #self.gpio_manager.register_button(6, 'Sleep - GPIO-' + str(6))
-        #self.gpio_manager.register_button(5, 'Fav9 - GPIO-' + str(5))
-        #self.gpio_manager.register_button(7, 'Fav4 - GPIO-' + str(7))
-        #self.gpio_manager.register_button(8, 'Fav1 - GPIO-' + str(8))
-        #self.gpio_manager.register_button(11, 'Fav6 - GPIO-' + str(11))
-        #self.gpio_manager.register_button(25, 'Fav2 - GPIO-' + str(25))
-        #self.gpio_manager.register_button(9, 'Fav3 - GPIO-' + str(9))
+        self.gpio_manager.register_button(self.config["pin_button_play"], 'play', longpress=False)
+        self.gpio_manager.register_button(self.config["pin_button_sleep"], 'sleep', longpress=False)
+        for i in range(1, 10):
+            self.gpio_manager.register_button(
+                self.config['pin_button_playlist_' + str(i)], "playlist_" + str(i))
 
         self.handle_sleep_timer()
+        self.volume_handle_thread = StoppableThread(target=self.handle_volume)
+        self.volume_handle_thread.start()
+        self.update_volume()
 
     def handle_sleep_timer(self):
-        for playlist in self.core.playlists.playlists.get():
-            for i in range(1, 10):
-                if self.config['playlist_' + str(i)] in playlist.name:
-                    if i not in self.playlists:
-                        logger.info('Playlist found for ' + str(i) + ' Button: ' + playlist.name)
-                    self.playlists[i] = playlist
-
+        self.update_playlists_registry()
         if self.sleep_time != False:
             if self.sleep_time > time.time():
                 logger.info(format_timespan(self.sleep_time - time.time()) + ' until sleep')
@@ -64,11 +57,72 @@ class GpioFrontend(pykka.ThreadingActor, core.CoreListener):
         self.sleep_handle_thread = threading.Timer(15, self.handle_sleep_timer)
         self.sleep_handle_thread.start()
 
+    def update_volume(self):
+        if self.core.playback.volume.get() != self.volume:
+            logger.info('updating volume: ' + str(self.volume))
+            self.core.playback.volume = self.volume
+        self.update_volume_thread = threading.Timer(0.1, self.update_volume)
+        self.update_volume_thread.start()
+
+    def handle_volume(self):
+            clk = 4
+            dt = 17
+
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(clk, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+            GPIO.setup(dt, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+            longWaitCounter = 0
+            longWaitThreshold = 3
+            longWaitTime = 0.01
+            shortWaitTime = 0.0001
+            volumeSteps = 2
+            clkLastState = GPIO.input(clk)
+
+            try:
+                while not self.volume_handle_thread.stopped():
+                    clkState = GPIO.input(clk)
+                    dtState = GPIO.input(dt)
+                    if clkState != clkLastState:
+                        volume = self.volume
+                        if dtState != clkState:
+                            volume += volumeSteps
+                        else:
+                            volume -= volumeSteps
+
+                        if volume > 100:
+                            volume = 100
+                        if volume < 0:
+                            volume = 0
+                        self.volume = volume
+                        longWaitCounter = 0
+                        #logger.info('internal volume: ' + str(self.volume))
+                    clkLastState = clkState
+                    longWaitCounter += 1
+                    if longWaitCounter > (longWaitThreshold / shortWaitTime):
+                        sleep(longWaitTime)
+                    else:
+                        sleep(shortWaitTime)
+            finally:
+                GPIO.cleanup()
+
+    def update_playlists_registry(self):
+        for playlist in self.core.playlists.playlists.get():
+            for i in range(1, 10):
+                playlist_identifier = 'playlist_' + str(i)
+                if self.config[playlist_identifier] in playlist.name:
+                    if playlist_identifier not in self.playlists:
+                        logger.info('Playlist found for ' + str(i) + ' Button: ' + playlist.name)
+                    self.playlists[playlist_identifier] = playlist
+
     def on_failure(exception_type, exception_value, traceback):
         self.sleep_handle_thread.cancel()
+        self.update_volume_thread.cancel()
 
     def on_stop(self):
         self.sleep_handle_thread.cancel()
+        self.volume_handle_thread.stop()
+        self.update_volume_thread.cancel()
 
     def playback_state_changed(self, old_state, new_state):
         return
@@ -78,6 +132,7 @@ class GpioFrontend(pykka.ThreadingActor, core.CoreListener):
             self.gpio_manager.set_led(False)
 
     def input(self, input_event):
+        logger.info(input_event['key'])
         try:
             if input_event['key'] == 'volume':
                 current = self.core.playback.volume.get()
@@ -103,7 +158,7 @@ class GpioFrontend(pykka.ThreadingActor, core.CoreListener):
                     self.core.playback.play()
             elif self.playlists[input_event['key']]:
                 playlist = self.playlists[input_event['key']]
-                if self.currentColor == input_event['key']:
+                if self.currentPlaylist == input_event['key']:
                     current_track = self.core.playback.get_current_track().get()
                     if input_event['long']:
                         for position in self.core.tracklist.get_tl_tracks().get():
@@ -117,10 +172,25 @@ class GpioFrontend(pykka.ThreadingActor, core.CoreListener):
                         self.core.playback.next()
                 else:
                     logger.info('Switching to Playlist "' + playlist.name)
-                    self.currentColor = input_event['key']
+                    self.currentPlaylist = input_event['key']
                     self.core.tracklist.clear()
                     self.core.tracklist.add(playlist.tracks)
                     self.core.playback.play()
 
         except Exception:
             traceback.print_exc()
+
+
+class StoppableThread(threading.Thread):
+    """Thread class with a stop() method. The thread itself has to check
+    regularly for the stopped() condition."""
+
+    def __init__(self, *args, **kwargs):
+        super(StoppableThread, self).__init__(*args, **kwargs)
+        self._stop = threading.Event()
+
+    def stop(self):
+        self._stop.set()
+
+    def stopped(self):
+        return self._stop.isSet()
